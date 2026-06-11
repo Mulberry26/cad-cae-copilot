@@ -252,6 +252,14 @@ def build_optimization_report(package_path: str | Path) -> dict[str, Any]:
     }
     sources_present["optimization_iterations"] = bool(opt_iters)
 
+    variable_list = (variables or {}).get("variables") if isinstance(variables, dict) else None
+    shape_bearing_ids = [
+        v.get("id")
+        for v in (variable_list or [])
+        if isinstance(v, dict) and v.get("shape_bearing") is True and v.get("id")
+    ]
+    shape_bearing_count = len(shape_bearing_ids)
+
     report = {
         "format": OPTIMIZATION_REPORT_FORMAT,
         "format_version": FORMAT_VERSION,
@@ -264,8 +272,11 @@ def build_optimization_report(package_path: str | Path) -> dict[str, Any]:
             "variable_count": (
                 len(problem.get("variables") or []) if isinstance(problem, dict) else None
             ),
+            "shape_bearing_variable_count": shape_bearing_count,
+            "shape_bearing_variable_ids": shape_bearing_ids,
+            "is_shape_study": shape_bearing_count > 0,
         },
-        "variables": (variables or {}).get("variables") if isinstance(variables, dict) else None,
+        "variables": variable_list,
         "objectives": (objectives or {}).get("objectives") if isinstance(objectives, dict) else None,
         "constraints": (constraints or {}).get("constraints") if isinstance(constraints, dict) else None,
         "candidate_count": len(candidate_rows),

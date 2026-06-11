@@ -74,9 +74,38 @@ def _read(pkg, name):
         return json.loads(zf.read(name))
 
 
+def _variables():
+    return {
+        "format": "aieng.optimization_variables",
+        "schema_version": "0.2",
+        "study_id": "study_001",
+        "design_study_problem_ref": "analysis/design_study_problem.json",
+        "variables": [
+            {"id": "wall_t", "path": "parts/0/params/WALL_THICKNESS", "type": "continuous",
+             "featureId": "feat_wall", "parameterName": "thickness",
+             "cad_parameter_name": "WALL_THICKNESS", "binding_status": "bound",
+             "current_value": 3.0, "min_value": 2.0, "max_value": 8.0,
+             "allowed_values": None, "unit": "mm", "scope": "local",
+             "safe_to_modify": True, "shape_bearing": False, "candidate_ids": []},
+            {"id": "fillet_r", "path": "parts/0/params/FILLET_RADIUS", "type": "continuous",
+             "featureId": "feat_fillet", "parameterName": "radius",
+             "cad_parameter_name": "FILLET_RADIUS", "binding_status": "bound",
+             "current_value": 2.0, "min_value": 0.5, "max_value": 5.0,
+             "allowed_values": None, "unit": "mm", "scope": "local",
+             "safe_to_modify": True, "shape_bearing": True, "candidate_ids": []},
+        ],
+        "candidate_ids": [],
+        "provenance": {"created_at": "2026-06-10T00:00:00Z", "created_by": "test",
+                       "claim_advancement": "none"},
+        "claim_policy": {"advisory_only": True, "baseline_unchanged": True,
+                         "human_approval_required_for_acceptance": True, "claim_advancement": "none"},
+    }
+
+
 def _full_members():
     return {
         "analysis/design_study_problem.json": _problem(),
+        "analysis/optimization_variables.json": _variables(),
         "analysis/design_study_candidate_ranking.json": _ranking(),
         "analysis/design_study_iterations.json": _iterations(),
         "analysis/optimization_recommendation.json": {
@@ -115,6 +144,12 @@ def test_full_study_report(tmp_path: Path):
     doc = _read(pkg, OPTIMIZATION_REPORT_PATH)
     assert doc["problem"]["id"] == "study_001"
     assert doc["problem"]["objective"]["metric"] == "mass"
+    assert doc["problem"]["shape_bearing_variable_count"] == 1
+    assert doc["problem"]["shape_bearing_variable_ids"] == ["fillet_r"]
+    assert doc["problem"]["is_shape_study"] is True
+    # variables are surfaced in the report
+    var_ids = {v["id"] for v in doc["variables"]}
+    assert var_ids == {"wall_t", "fillet_r"}
     assert {c["candidate_id"] for c in doc["candidates"]} == {"cand_good", "cand_bad"}
     # metrics pulled from per-candidate evaluation
     good = [c for c in doc["candidates"] if c["candidate_id"] == "cand_good"][0]

@@ -62,7 +62,6 @@ def _design_study_problem() -> dict:
 
 def valid_documents() -> dict[str, dict]:
     common = {
-        "schema_version": "0.1",
         "study_id": "opt_study_001",
         "design_study_problem_ref": "analysis/design_study_problem.json",
         "design_study_problem_id": "study_source_001",
@@ -73,6 +72,7 @@ def valid_documents() -> dict[str, dict]:
     return {
         "study": {
             **copy.deepcopy(common),
+            "schema_version": "0.1",
             "format": "aieng.optimization_study",
             "algorithm": {"name": "latin_hypercube", "phase": 1, "bounded_step": True, "seed": 7},
             "sampling": {"requested_candidate_count": 5, "max_candidate_count": 20, "seed": 7},
@@ -87,6 +87,7 @@ def valid_documents() -> dict[str, dict]:
         },
         "variables": {
             **copy.deepcopy(common),
+            "schema_version": "0.2",
             "format": "aieng.optimization_variables",
             "variables": [
                 {
@@ -110,6 +111,7 @@ def valid_documents() -> dict[str, dict]:
         },
         "objectives": {
             **copy.deepcopy(common),
+            "schema_version": "0.1",
             "format": "aieng.optimization_objectives",
             "objectives": [
                 {
@@ -125,6 +127,7 @@ def valid_documents() -> dict[str, dict]:
         },
         "constraints": {
             **copy.deepcopy(common),
+            "schema_version": "0.1",
             "format": "aieng.optimization_constraints",
             "constraints": [
                 {
@@ -142,6 +145,7 @@ def valid_documents() -> dict[str, dict]:
         },
         "decision_log": {
             **copy.deepcopy(common),
+            "schema_version": "0.1",
             "format": "aieng.optimization_decision_log",
             "entries": [
                 {
