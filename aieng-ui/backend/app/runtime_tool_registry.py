@@ -80,19 +80,18 @@ def register_runtime_tools(*, active_settings: Any, app_context: Any) -> Runtime
     # Each closure captures active_settings so tool handlers call existing
     # business-logic functions without duplicating them.
 
-    def _tool_inspect_package(inp: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
-        pid = inp.get("project_id")
-        if not pid:
-            raise ValueError("project_id is required for aieng.inspect_package")
-        return package_summary(active_settings, pid)
+    from .runtime_tool_schemas import get_schema as _schema
+    from .tools import agent as _agent_tools
+    from .tools import cad as _cad_tools
+    from .tools import cae as _cae_tools
+    from .tools import optimization as _opt_tools
+    from .tools import project as _project_tools
 
-    def _tool_agent_context(inp: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
-        from . import agent_context
-
-        pid = inp.get("project_id")
-        if not pid:
-            raise ValueError("project_id is required for aieng.agent_context")
-        return agent_context.build_agent_context(active_settings, str(pid))
+    _agent_tools.register_agent_tools(_rt, active_settings, app_context, _schema)
+    _project_tools.register_project_tools(_rt, active_settings, app_context, _schema)
+    _cad_tools.register_cad_tools(_rt, active_settings, app_context, _schema)
+    _cae_tools.register_cae_tools(_rt, active_settings, app_context, _schema)
+    _opt_tools.register_opt_tools(_rt, active_settings, app_context, _schema)
 
     def _tool_refresh_semantics(inp: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
         pid = inp.get("project_id")
@@ -1925,137 +1924,6 @@ def register_runtime_tools(*, active_settings: Any, app_context: Any) -> Runtime
         return out
 
 
-    from .runtime_tool_schemas import get_schema as _schema
-
-    # ── agent onboarding tools ────────────────────────────────────────────────
-
-    def _tool_aieng_list_projects(_inp: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
-        """List all .aieng projects the workbench knows about.
-
-        Broken projects (missing or unreadable metadata) are filtered out so the
-        agent never receives a project_id that would later return 404.
-        """
-        projects: list[dict[str, Any]] = []
-        for path in active_settings.projects_root.glob("*/metadata.json"):
-            metadata = read_json(path, None)
-            if metadata is None:
-                continue  # unreadable / broken metadata
-            if not isinstance(metadata, dict):
-                continue
-            if not metadata.get("id"):
-                continue  # missing project_id — would cause 404 downstream
-            projects.append(normalize_project(metadata))
-        projects.sort(key=lambda p: p.get("updated_at", ""), reverse=True)
-        return {"projects": projects, "count": len(projects)}
-
-    _rt.register_tool(
-        "aieng.list_projects",
-        _tool_aieng_list_projects,
-        description=(
-            "List all projects available in this workbench instance. Returns id, "
-            "name, status, last-modified, and (for agent-built geometry) named_parts "
-            "+ part_count for each project. Call this first if you don't know which "
-            "project_id to use; use aieng.find_projects_by_part to locate a project "
-            "by a part label."
-        ),
-        input_schema=_schema("aieng.list_projects"),
-    )
-
-    def _tool_aieng_create_project(_inp: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
-        """Create a new empty project."""
-        from .project_io import default_project, save_project
-
-        name = str(_inp.get("name") or "").strip() or "Untitled project"
-        project = save_project(active_settings, default_project(name))
-        return {
-            "id": project["id"],
-            "name": project["name"],
-            "status": project.get("status", "empty"),
-            "created_at": project.get("created_at"),
-            "message": f"Project '{project['name']}' created successfully.",
-        }
-
-    _rt.register_tool(
-        "aieng.create_project",
-        _tool_aieng_create_project,
-        description=(
-            "Create a new empty workbench project. Returns the project's id, name, "
-            "and status. Use this when the user wants to start CAD modeling from "
-            "scratch and no suitable existing project is available. The returned "
-            "id can be passed directly to geometry-mutation tools such as "
-            "cad.execute_build123d."
-        ),
-        input_schema=_schema("aieng.create_project"),
-    )
-
-    def _tool_aieng_find_projects_by_part(_inp: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
-        """Find projects whose geometry contains a named part matching the query.
-
-        Scans each project's metadata ``named_parts`` (cheap; populated on every
-        agent build); for older projects without that field it falls back to
-        reading the package's feature graph. Substring, case-insensitive.
-        """
-        from .cad_generation import _named_parts_from_package
-        from .project_io import resolve_project_path
-
-        query = str(_inp.get("query") or "").strip().lower()
-        if not query:
-            return {"query": "", "matches": [], "count": 0}
-        matches: list[dict[str, Any]] = []
-        for path in active_settings.projects_root.glob("*/metadata.json"):
-            proj = normalize_project(read_json(path, {}))
-            parts = proj.get("named_parts")
-            if not isinstance(parts, list):
-                parts = []
-                pkg_path = resolve_project_path(active_settings, proj["id"], proj.get("aieng_file"))
-                if pkg_path and pkg_path.exists():
-                    parts = _named_parts_from_package(pkg_path)
-            hits = [str(p) for p in parts if query in str(p).lower()]
-            if hits:
-                matches.append({
-                    "id": proj["id"],
-                    "name": proj["name"],
-                    "status": proj.get("status"),
-                    "matched_parts": hits,
-                    "part_count": len(parts),
-                })
-        matches.sort(key=lambda m: (-len(m["matched_parts"]), m["name"]))
-        return {"query": query, "matches": matches, "count": len(matches)}
-
-    _rt.register_tool(
-        "aieng.find_projects_by_part",
-        _tool_aieng_find_projects_by_part,
-        description=(
-            "Find projects whose geometry contains a named part matching the query "
-            "(case-insensitive substring on part labels). Use this to locate a model "
-            "by content, e.g. find which project holds the 'optimus' parts."
-        ),
-        input_schema=_schema("aieng.find_projects_by_part"),
-    )
-
-    def _tool_aieng_delete_project(_inp: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
-        """Permanently delete a project: its directory + chat sessions/messages."""
-        pid = str(_inp.get("project_id") or "").strip()
-        if not pid:
-            return {"status": "error", "message": "project_id is required"}
-        try:
-            result = _delete_project_everywhere(pid)
-        except HTTPException:
-            return {"status": "error", "code": "not_found", "message": f"project not found: {pid}"}
-        return {"status": "ok", **result}
-
-    _rt.register_tool(
-        "aieng.delete_project",
-        _tool_aieng_delete_project,
-        description=(
-            "[APPROVAL REQUIRED] Permanently delete a project — its .aieng package, "
-            "metadata, viewer assets, and all chat sessions/messages. Irreversible. "
-            "Confirm with the user before calling."
-        ),
-        input_schema=_schema("aieng.delete_project"),
-        requires_approval=True,
-    )
-
     def _tool_aieng_apply_shape_ir_patch(inp: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
         """Apply a surgical patch to a project's Shape IR (atomic + validated),
         then recompile through runtime routing. dry_run validates + reports only."""
@@ -2882,69 +2750,6 @@ def register_runtime_tools(*, active_settings: Any, app_context: Any) -> Runtime
         input_schema=_schema("cae.map_results"),
     )
 
-    def _tool_aieng_agent_readme(inp: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
-        """Return compact onboarding by default, with a full-guide compatibility mode."""
-        from . import agent_guides
-
-        if str(inp.get("detail") or "quickstart").lower() == "full":
-            result = agent_guides.full_result()
-        else:
-            result = agent_guides.quickstart_result()
-        # Registry identity so an agent can tell if this long-lived MCP session
-        # is serving a stale tool set (#29) — compare against GET /api/health.
-        result["registry"] = _rt.registry_identity()
-        return result
-
-    _rt.register_tool(
-        "aieng.agent_readme",
-        _tool_aieng_agent_readme,
-        description=(
-            "Return compact operational onboarding. Read this once at the start of a session, "
-            "then use aieng.guide only for task-specific detail. detail=full preserves access "
-            "to the canonical complete AGENTS.md."
-        ),
-        input_schema=_schema("aieng.agent_readme"),
-    )
-
-    def _tool_aieng_guide(inp: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
-        """Return one detailed guide topic extracted from canonical AGENTS.md."""
-        from . import agent_guides
-
-        return agent_guides.guide_result(str(inp.get("topic") or ""))
-
-    _rt.register_tool(
-        "aieng.guide",
-        _tool_aieng_guide,
-        description=(
-            "Return task-specific detail extracted from the canonical AGENTS.md without "
-            "loading the full guide. Topics include cad, cae, pointers, tools, workflows, "
-            "package, fallback, frontend, approvals, operators, and full."
-        ),
-        input_schema=_schema("aieng.guide"),
-    )
-
-    _rt.register_tool(
-        "aieng.inspect_package",
-        _tool_inspect_package,
-        description=(
-            "Inspect a .aieng package and return the full project semantic summary "
-            "(geometry, CAE setup, results, verdict, design targets). "
-            "Call this first when starting work on a project to understand its current state."
-        ),
-        input_schema=_schema("aieng.inspect_package"),
-    )
-    _rt.register_tool(
-        "aieng.agent_context",
-        _tool_agent_context,
-        description=(
-            "Return the compact agent-facing CAD/CAE context: geometry with @face/@feature pointers, "
-            "stale-artifact warnings (EDIT IMPACT), CAE setup summary, results, design targets, "
-            "and suggested next steps. "
-            "Call this before every project-level action — it gives you the pointer IDs needed "
-            "to construct valid cad.* and cae.* tool calls."
-        ),
-        input_schema=_schema("aieng.agent_context"),
-    )
     _rt.register_tool(
         "aieng.refresh_semantics",
         _tool_refresh_semantics,
