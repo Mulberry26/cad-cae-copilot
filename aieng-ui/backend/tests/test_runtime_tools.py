@@ -110,3 +110,68 @@ def test_engineering_template_preview_is_read_only(tmp_path: Path) -> None:
     assert run.status_code == 200, run.text
     run_dict = run.json()
     assert run_dict["status"] == "completed"
+
+
+# ── migrated CAD tool registration smoke tests ────────────────────────────────
+
+
+_CAD_TOOLS_EXPECTED: dict[str, dict[str, Any]] = {
+    # read-only / no-approval tools
+    "cad.plan_build123d_skill": {"requires_approval": False, "read_only": True, "destructive": False},
+    "cad.get_source": {"requires_approval": False, "read_only": True, "destructive": False},
+    "cad.list_editable_parameters": {"requires_approval": False, "read_only": True, "destructive": False},
+    "cad.critique": {"requires_approval": False, "read_only": True, "destructive": False},
+    "cad.design_review": {"requires_approval": False, "read_only": True, "destructive": False},
+    "cad.get_named_part_bbox": {"requires_approval": False, "read_only": True, "destructive": False},
+    "cad.list_snapshots": {"requires_approval": False, "read_only": True, "destructive": False},
+    # package-mutating but per-call approval=false (plan-level gating)
+    "cad.execute_build123d": {"requires_approval": False, "read_only": False, "destructive": False},
+    "cad.set_reference_image": {"requires_approval": False, "read_only": False, "destructive": False},
+    "cad.search_reference_image": {"requires_approval": False, "read_only": False, "destructive": False},
+    "cad.refine": {"requires_approval": False, "read_only": False, "destructive": False},
+    "cad.edit_parameter": {"requires_approval": False, "read_only": False, "destructive": False},
+    "cad.remove_part": {"requires_approval": False, "read_only": False, "destructive": False},
+    "cad.replace_part": {"requires_approval": False, "read_only": False, "destructive": False},
+    # approval-gated tools
+    "cad.confirm_modeling_plan": {"requires_approval": True, "read_only": False, "destructive": True},
+    "cad.restore_snapshot": {"requires_approval": True, "read_only": False, "destructive": True},
+}
+
+
+def test_cad_tools_are_registered_after_migration(tmp_path: Path) -> None:
+    """All cad.* tools survive the move from runtime_tool_registry.py."""
+    settings = _make_settings(tmp_path)
+    client = TestClient(create_app(settings))
+    tools = {t["name"]: t for t in client.get("/api/runtime/tools").json()}
+
+    for name, expected in _CAD_TOOLS_EXPECTED.items():
+        assert name in tools, f"{name} not registered after migration"
+        actual = tools[name]
+        for key, value in expected.items():
+            assert actual[key] == value, f"{name}.{key} = {actual[key]!r}, expected {value!r}"
+
+
+def test_register_cad_tools_directly() -> None:
+    """The new registrar can be called with a minimal registry stand-in."""
+    from app import runtime_cad_tools
+
+    registered: dict[str, dict[str, Any]] = {}
+
+    class _FakeRegistry:
+        @staticmethod
+        def register_tool(name: str, handler: Any, **kwargs: Any) -> None:
+            registered[name] = {"handler": handler, **kwargs}
+
+    runtime_cad_tools.register_cad_tools(
+        _FakeRegistry(),
+        active_settings=None,
+        load_project_feature_parameters=lambda _pid: None,
+    )
+
+    assert set(registered) == set(_CAD_TOOLS_EXPECTED)
+    for name in _CAD_TOOLS_EXPECTED:
+        assert registered[name]["handler"] is not None
+        assert registered[name].get("description")
+        # Approval-gated tools must explicitly pass requires_approval=True.
+        if name in {"cad.confirm_modeling_plan", "cad.restore_snapshot"}:
+            assert registered[name].get("requires_approval") is True
