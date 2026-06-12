@@ -896,7 +896,7 @@ fixture and load on flat interfaces.
 | `aieng.read_audit_log` | Recent agent/user actions on this project |
 | `aieng.validate` | Schema + rule validation report (no mutation) |
 | `aieng.write_completeness_report` | What is missing before simulation |
-| `cae.prepare_solver_run` | Solver preflight — checks readiness, runs nothing |
+| `cae.prepare_solver_run` | Solver preflight — checks readiness, runs nothing. Returns `recommended_next_calls` listing the exact `cae.*` calls (or environment actions) needed to reach a runnable state |
 | `cad.get_source` | Accumulated build123d source + `{named_parts, has_base}` — call before an incremental edit |
 | `cad.list_editable_parameters` | List the parameters editable fast via `cad.edit_parameter` (the "point" of point-and-shoot): per-parameter `featureId`/`parameterName`/`cad_parameter_name`/current/min-max + `scope` (`local`/`global`/`unscoped`) + a summary. Answers "what can I change here?" |
 | `cad.critique` | Deterministic engineering audit (min wall, hole sizes, floating components) — call after building an engineering part |
@@ -1060,6 +1060,34 @@ whole script each time.
 7. cae.extract_field_regions  { project_id }
 8. postprocess.refresh_cae_summary { project_id }
 ```
+
+`cae.prepare_solver_run` returns `recommended_next_calls`: a list of actionable next
+steps derived from the preflight check. Agents should present these to the user as the
+guided path forward, but must still treat `cae.run_solver` as approval-gated and must
+not claim the solver ran without evidence.
+
+Each entry in `recommended_next_calls` has one of two shapes:
+
+- **Tool-based entry** — when a specific `cae.*` call will move the setup forward:
+  ```json
+  {
+    "tool": "cae.apply_setup_patch",
+    "input": { "project_id": "...", "patches": [...] },
+    "reason": "Missing solver settings. Create simulation/solver_settings.json..."
+  }
+  ```
+- **Environment/action entry** — when the blocker is outside the tool surface:
+  ```json
+  {
+    "tool": null,
+    "action": "Install CalculiX and ensure ccx is on PATH, or set AIENG_CCX_CMD.",
+    "reason": "CalculiX command not found."
+  }
+  ```
+
+When `ready_to_run` is true, the final entry recommends `cae.run_solver` and carries
+`requires_approval: true` as a reminder that execution is gated. The agent must obtain
+approval before invoking it and must not auto-run the solver.
 
 ### D — Inspect results and explain findings
 ```
