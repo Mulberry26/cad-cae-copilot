@@ -80,3 +80,17 @@ jobs:
 
       - name: Check agent docs alignment
         run: python scripts/check_agent_docs.py
+
+  version-surface:
+    name: Version surface integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check version-surface hashes
+        run: python scripts/update_version_surface.py --check
