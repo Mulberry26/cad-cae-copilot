@@ -1,4 +1,4 @@
-﻿export type CadRecommendationProposal = {
+export type CadRecommendationProposal = {
   proposal_id: string;
   rank?: number;
   feature_ref: string;
@@ -846,6 +846,38 @@ export type SolverFieldDescriptor = {
   node_coords?: [number, number, number][] | null;
   warnings?: string[] | null;
   bbox_status?: "aligned" | "suspicious" | null;
+};
+
+export type CaeSetupLoad = {
+  id: string;
+  target_feature: string;
+  face_ids: string[];
+  magnitude_n: number;
+  direction: [number, number, number];
+  type: string;
+  reason?: string;
+};
+
+export type CaeSetupConstraint = {
+  id: string;
+  target_feature: string;
+  face_ids: string[];
+  type: string;
+  reason?: string;
+};
+
+export type CaeSetupOverlayResponse = {
+  available: boolean;
+  reason?: string;
+  schema_version?: string;
+  material_name?: string | null;
+  analysis_type?: string | null;
+  mesh_target_size_mm?: number | null;
+  topology_hash?: string | null;
+  mapping_stale?: boolean;
+  loads: CaeSetupLoad[];
+  constraints: CaeSetupConstraint[];
+  warnings?: string[];
 };
 
 export type RuntimeEventType =

@@ -355,6 +355,140 @@ def register_project_workflow_routes(
             "part_boxes": part_boxes,
         }
 
+    @app.get("/api/projects/{project_id}/cae-setup-overlay")
+    def get_cae_setup_overlay_endpoint(project_id: str) -> dict[str, Any]:
+        """CAE setup overlay for the viewer: loads, constraints, and bound faces.
+
+        Reads simulation/setup.yaml, simulation/cae_mapping.json, and
+        geometry/topology_map.json from the project's .aieng package and returns
+        a compact, face-resolved description suitable for drawing load arrows,
+        constraint glyphs, and bound-face highlights. Missing or stale data is
+        returned as available=false with a reason, not a 404.
+        """
+        import json as _json
+        import re
+        import zipfile as _zipfile
+
+        import yaml
+
+        from ..project_io import get_project, resolve_project_path
+
+        empty = {"available": False, "reason": "unknown", "loads": [], "constraints": []}
+
+        try:
+            project = get_project(active_settings, project_id)
+        except Exception:
+            return {**empty, "reason": "project_not_found"}
+
+        pkg_path = resolve_project_path(active_settings, project_id, project.get("aieng_file"))
+        if pkg_path is None or not pkg_path.exists():
+            return {**empty, "reason": "no_package"}
+
+        try:
+            with _zipfile.ZipFile(pkg_path, "r") as zf:
+                names = set(zf.namelist())
+                if "simulation/setup.yaml" not in names:
+                    return {**empty, "reason": "no_setup"}
+                setup = yaml.safe_load(zf.read("simulation/setup.yaml").decode("utf-8")) or {}
+                mapping: dict[str, Any] = {}
+                if "simulation/cae_mapping.json" in names:
+                    mapping = _json.loads(zf.read("simulation/cae_mapping.json").decode("utf-8")) or {}
+                topo: dict[str, Any] = {}
+                if "geometry/topology_map.json" in names:
+                    topo = _json.loads(zf.read("geometry/topology_map.json").decode("utf-8")) or {}
+        except Exception as exc:
+            log_exception(LOGGER, "cae-setup-overlay read failed", exc)
+            return {**empty, "reason": "read_failed"}
+
+        valid_face_ids = {
+            e["id"]
+            for e in (topo.get("entities") or [])
+            if isinstance(e, dict) and e.get("type") == "face" and "id" in e
+        }
+
+        feature_to_mapping = {
+            (m.get("maps_to") or {}).get("feature_id"): m
+            for m in (mapping.get("mappings") or [])
+            if isinstance(m, dict) and (m.get("maps_to") or {}).get("feature_id")
+        }
+
+        face_pointer_re = re.compile(r"@face:([A-Za-z0-9_]+)")
+
+        def _face_pointer_ids(pointers: list[Any] | None) -> list[str]:
+            out: list[str] = []
+            for p in pointers or []:
+                match = face_pointer_re.search(str(p))
+                if match:
+                    out.append(match.group(1))
+            return out
+
+        def _resolve_face_ids(item: dict[str, Any]) -> tuple[list[str], list[str]]:
+            warnings: list[str] = []
+            fids: list[str] = list(item.get("target_face_ids") or [])
+            if not fids:
+                mp = feature_to_mapping.get(item.get("target_feature"))
+                if mp:
+                    fids = list(mp.get("face_ids") or [])
+                if not fids:
+                    fids = _face_pointer_ids(item.get("target_pointers"))
+                if not fids and mp:
+                    maps_to = mp.get("maps_to") or {}
+                    fids = _face_pointer_ids(maps_to.get("target_pointers"))
+            stale = [fid for fid in fids if fid not in valid_face_ids]
+            if stale:
+                warnings.append(f"stale face reference(s): {', '.join(stale)}")
+            return fids, warnings
+
+        loads: list[dict[str, Any]] = []
+        constraints: list[dict[str, Any]] = []
+        all_warnings: list[str] = []
+
+        for ld in setup.get("loads") or []:
+            if not isinstance(ld, dict):
+                continue
+            fids, ws = _resolve_face_ids(ld)
+            all_warnings.extend(ws)
+            direction = ld.get("direction") or [0.0, 0.0, -1.0]
+            loads.append(
+                {
+                    "id": str(ld.get("id", "?")),
+                    "target_feature": str(ld.get("target_feature", "?")),
+                    "face_ids": fids,
+                    "magnitude_n": float(ld.get("value_n") or 0.0),
+                    "direction": [float(direction[i]) if i < len(direction) else 0.0 for i in range(3)],
+                    "type": str(ld.get("type", "force")),
+                    "reason": str(ld.get("reason", "")),
+                }
+            )
+
+        for bc in setup.get("boundary_conditions") or []:
+            if not isinstance(bc, dict):
+                continue
+            fids, ws = _resolve_face_ids(bc)
+            all_warnings.extend(ws)
+            constraints.append(
+                {
+                    "id": str(bc.get("id", "?")),
+                    "target_feature": str(bc.get("target_feature", "?")),
+                    "face_ids": fids,
+                    "type": str(bc.get("type", "fixed")),
+                    "reason": str(bc.get("reason", "")),
+                }
+            )
+
+        return {
+            "available": True,
+            "schema_version": str(setup.get("schema_version", "0.1")),
+            "material_name": setup.get("material_name"),
+            "analysis_type": setup.get("analysis_type"),
+            "mesh_target_size_mm": (setup.get("mesh") or {}).get("target_size_mm"),
+            "topology_hash": setup.get("topology_hash") or mapping.get("topology_hash"),
+            "mapping_stale": bool(mapping.get("stale")),
+            "loads": loads,
+            "constraints": constraints,
+            "warnings": all_warnings,
+        }
+
     @app.get("/api/projects/{project_id}/edit-diff")
     def get_edit_diff_endpoint(project_id: str) -> dict[str, Any]:
         """The most recent edit's diff for the viewer (#226), read-only.

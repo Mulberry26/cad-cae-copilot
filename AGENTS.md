@@ -341,6 +341,14 @@ single-part edit.
   around each part in a broken / missing left-right symmetry pair — the same
   `geometry_report` structural signals `cad.design_review` folds in, made visible
   in 3D. Read-only; the toggle only appears when there is at least one alert.
+- **CAE setup overlay (#247).** When a simulation setup exists, a "Show CAE setup"
+  toggle draws amber load arrows (with magnitude labels), cyan fixed-support glyphs,
+  and tinted face highlights on the loaded and constrained faces. The backend
+  endpoint `/api/projects/{id}/cae-setup-overlay` (`project_workflows.py`) reads
+  `simulation/setup.yaml` + `simulation/cae_mapping.json` + `geometry/topology_map.json`
+  and resolves face references; the frontend builder is `caeSetupOverlay.ts` and the
+  overlay manager is `useCaeSetupOverlay.ts`. Stale or unresolved face IDs are
+  surfaced as warnings and highlighted in red.
 **Follow-up / reply normalization.** Follow-up and reply messages are re-resolved
 so their intent is recorded explicitly rather than left implicit
 (`_normalize_followup_intent` in
