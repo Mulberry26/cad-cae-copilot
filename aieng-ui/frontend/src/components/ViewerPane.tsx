@@ -1,7 +1,13 @@
+import { useEffect, useMemo, useState } from "react";
+
 import { ModelViewer } from "./ModelViewer";
 import { FieldPicker } from "./FieldPicker";
 import { FieldLegend } from "./FieldLegend";
 import { resultFieldLabel } from "./viewer/resultFields";
+import {
+  DEFAULT_FIELD_COLOR_MAPPING,
+  type FieldColorMapping,
+} from "./viewer/fieldColors";
 import type { BrepGraphSnapshot, CadGenerationProgress, PickedFace } from "../appTypes";
 import type { ProjectRecord, SolverFieldDescriptor } from "../types";
 
@@ -44,6 +50,43 @@ export function ViewerPane({
   brepSnapshot,
   onClearHighlightedFaces,
 }: ViewerPaneProps) {
+  const [colorMapping, setColorMapping] = useState<FieldColorMapping>(
+    DEFAULT_FIELD_COLOR_MAPPING,
+  );
+
+  const fieldKey = useMemo(
+    () =>
+      activeFieldDescriptor
+        ? `${activeFieldDescriptor.source}:${activeFieldDescriptor.analysis ?? ""}:${activeFieldDescriptor.step ?? ""}:${activeFieldDescriptor.component ?? ""}`
+        : null,
+    [activeFieldDescriptor],
+  );
+
+  useEffect(() => {
+    setColorMapping(DEFAULT_FIELD_COLOR_MAPPING);
+  }, [fieldKey]);
+
+  const effectiveDescriptor = useMemo(() => {
+    if (!activeFieldDescriptor) return null;
+    const values = activeFieldDescriptor.values;
+    if (!values || values.length === 0) return activeFieldDescriptor;
+    const effective: SolverFieldDescriptor = { ...activeFieldDescriptor };
+    const min = values.min;
+    const max = values.max;
+    if (colorMapping.clampMin != null || colorMapping.clampMax != null) {
+      effective.values = { ...values };
+      effective.values.min =
+        colorMapping.clampMin != null
+          ? Math.max(colorMapping.clampMin, min)
+          : min;
+      effective.values.max =
+        colorMapping.clampMax != null
+          ? Math.min(colorMapping.clampMax, max)
+          : max;
+    }
+    return effective;
+  }, [activeFieldDescriptor, colorMapping]);
+
   return (
     <section className="viewer-pane">
       <div className="viewer-header">
@@ -74,11 +117,16 @@ export function ViewerPane({
           {caeResultsAvailable ? (
             <FieldPicker value={selectedCaeField} onChange={onSelectCaeField} />
           ) : null}
-          <FieldLegend descriptor={activeFieldDescriptor} />
+          <FieldLegend
+            fieldDescriptor={activeFieldDescriptor}
+            mapping={colorMapping}
+            onMappingChange={setColorMapping}
+          />
           <ModelViewer
             assetUrl={effectiveViewerUrl}
             assetFormat={effectiveViewerFormat}
-            fieldDescriptor={activeFieldDescriptor}
+            fieldDescriptor={effectiveDescriptor}
+            colorMapping={colorMapping}
             projectId={selectedProject?.id ?? null}
             pickedFaces={pickedFaces}
             onAddPickedFace={onAddPickedFace}

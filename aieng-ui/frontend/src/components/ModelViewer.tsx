@@ -7,6 +7,7 @@ import { useMeshPreview } from "../app/useMeshPreview";
 import type { BrepGraphSnapshot, CadGenerationProgress, PickedFace, ViewerLoadState } from "../appTypes";
 import { resolveAssetFormat } from "../appUtils";
 import type { SolverFieldDescriptor } from "../types";
+import type { FieldColorMappingOptions } from "./viewer/fieldColors";
 import { ViewerOverlays } from "./viewer/ViewerOverlays";
 import {
   useThreeScene,
@@ -23,6 +24,7 @@ export function ModelViewer({
   assetUrl,
   assetFormat,
   fieldDescriptor,
+  colorMapping,
   projectId,
   pickedFaces,
   onAddPickedFace,
@@ -36,6 +38,7 @@ export function ModelViewer({
   assetUrl?: string | null;
   assetFormat?: string | null;
   fieldDescriptor?: SolverFieldDescriptor | null;
+  colorMapping?: FieldColorMappingOptions | null;
   projectId?: string | null;
   pickedFaces: PickedFace[];
   onAddPickedFace(face: PickedFace): void;
@@ -100,6 +103,7 @@ export function ModelViewer({
     fieldDescriptor,
     () => setObjectReadyKey((k) => k + 1),
     setViewerState,
+    colorMapping,
   );
 
   // 3. Face identity maps (viewer↔model transform + primitive↔face)
