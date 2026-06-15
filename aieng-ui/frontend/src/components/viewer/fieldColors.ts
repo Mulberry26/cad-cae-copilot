@@ -4,15 +4,55 @@ import * as THREE from "three";
 // or map per-node solver values onto displayed mesh vertices via a spatial grid.
 // All pure THREE.js — no React, unit-testable in isolation.
 
+export const COLORMAP_NAMES = ["thermal", "coolwarm", "viridis", "grayscale"] as const;
+export type ColormapName = (typeof COLORMAP_NAMES)[number];
+
+export type FieldColorMappingOptions = {
+  clampMin?: number | null;
+  clampMax?: number | null;
+  bands?: number | null;
+  threshold?: number | null;
+};
+
+export type FieldColorMapping = {
+  colormap: ColormapName;
+  clampMin: number | null;
+  clampMax: number | null;
+  bands: number | null;
+  threshold: number | null;
+};
+
+export const DEFAULT_FIELD_COLOR_MAPPING: FieldColorMapping = {
+  colormap: "thermal",
+  clampMin: null,
+  clampMax: null,
+  bands: null,
+  threshold: null,
+};
+
+const NO_COLOR = new THREE.Color(0.5, 0.5, 0.5);
+
 // CSS color stops across a colormap, for a legend gradient bar (low→high).
-export function colormapCssStops(name?: string | null, count = 8): string[] {
+export function colormapCssStops(
+  name?: string | null,
+  count = 8,
+  bands?: number | null,
+): string[] {
   const stops: string[] = [];
-  const n = Math.max(2, count);
+  const n = bands && bands >= 2 ? bands : Math.max(2, count);
   for (let i = 0; i < n; i += 1) {
-    const c = sampleColormap(i / (n - 1), name);
-    stops.push(`rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`);
+    const t = i / (n - 1);
+    const displayT = bands && bands >= 2 ? quantize(t, bands) : t;
+    const c = sampleColormap(displayT, name);
+    stops.push(
+      `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`,
+    );
   }
   return stops;
+}
+
+function quantize(t: number, bands: number): number {
+  return Math.floor(t * bands) / Math.max(1, bands - 1);
 }
 
 export function sampleColormap(t: number, name?: string | null): THREE.Color {
@@ -23,6 +63,16 @@ export function sampleColormap(t: number, name?: string | null): THREE.Color {
     const g = c < 0.5 ? 0.2 + c * 1.6 : 1.0 - (c - 0.5) * 2.0;
     const b = c < 0.5 ? 1.0 : 1.0 - (c - 0.5) * 1.6;
     return new THREE.Color(r, g, b);
+  }
+  if (name === "viridis") {
+    // Perceptually-uniform purple -> teal -> yellow
+    const r = Math.max(0, Math.min(1, 0.267 + 0.105 * c - 0.63 * c * c + 1.36 * c * c * c));
+    const g = Math.max(0, Math.min(1, 0.004 + 0.898 * c + 0.05 * c * c));
+    const b = Math.max(0, Math.min(1, 0.329 + 0.644 * c - 1.5 * c * c + 0.58 * c * c * c));
+    return new THREE.Color(r, g, b);
+  }
+  if (name === "grayscale") {
+    return new THREE.Color(c, c, c);
   }
   // thermal: blue -> cyan -> green -> yellow -> red
   const r = Math.max(0, Math.min(1, 1.5 - Math.abs(4 * c - 3)));
@@ -110,101 +160,26 @@ export function nearestNodeIndex(
 
   let bestIdx = -1;
   let bestDist = Infinity;
-  let searchRadius = 1;
 
-  while (searchRadius <= 3) {
-    let foundAny = false;
-    for (let dx = -searchRadius; dx <= searchRadius; dx++) {
-      for (let dy = -searchRadius; dy <= searchRadius; dy++) {
-        for (let dz = -searchRadius; dz <= searchRadius; dz++) {
-          if (searchRadius > 1 && Math.abs(dx) < searchRadius && Math.abs(dy) < searchRadius && Math.abs(dz) < searchRadius) {
-            continue;
-          }
-          const key = `${ix + dx},${iy + dy},${iz + dz}`;
-          const indices = cells.get(key);
-          if (!indices) continue;
-          foundAny = true;
-          for (const idx of indices) {
-            const [nx, ny, nz] = nodeCoords[idx];
-            const d = (vx - nx) ** 2 + (vy - ny) ** 2 + (vz - nz) ** 2;
-            if (d < bestDist) {
-              bestDist = d;
-              bestIdx = idx;
-            }
+  for (let dx = -1; dx <= 1; dx += 1) {
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dz = -1; dz <= 1; dz += 1) {
+        const key = `${ix + dx},${iy + dy},${iz + dz}`;
+        const candidates = cells.get(key);
+        if (!candidates) continue;
+        for (const idx of candidates) {
+          const [nx, ny, nz] = nodeCoords[idx];
+          const dist2 = (vx - nx) ** 2 + (vy - ny) ** 2 + (vz - nz) ** 2;
+          if (dist2 < bestDist) {
+            bestDist = dist2;
+            bestIdx = idx;
           }
         }
       }
     }
-    if (bestIdx !== -1) break;
-    if (!foundAny && searchRadius >= 3) break;
-    searchRadius++;
   }
 
-  if (bestIdx === -1) {
-    for (let i = 0; i < nodeCoords.length; i++) {
-      const [nx, ny, nz] = nodeCoords[i];
-      const d = (vx - nx) ** 2 + (vy - ny) ** 2 + (vz - nz) ** 2;
-      if (d < bestDist) {
-        bestDist = d;
-        bestIdx = i;
-      }
-    }
-  }
   return bestIdx;
-}
-
-export function checkBboxAlignment(
-  nodeCoords: [number, number, number][],
-  object: THREE.Object3D,
-): { status: "aligned" | "suspicious"; reason?: string } {
-  const meshBox = new THREE.Box3().setFromObject(object);
-  if (meshBox.isEmpty()) return { status: "suspicious", reason: "Mesh bbox empty" };
-
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const [x, y, z] of nodeCoords) {
-    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
-    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-    minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
-  }
-
-  const frdCenter = new THREE.Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
-  const meshCenter = new THREE.Vector3();
-  meshBox.getCenter(meshCenter);
-  const frdSize = new THREE.Vector3(maxX - minX, maxY - minY, maxZ - minZ);
-  const meshSize = new THREE.Vector3();
-  meshBox.getSize(meshSize);
-
-  const effectiveMeshSize = new THREE.Vector3(
-    meshSize.x < 1e-6 ? 1 : meshSize.x,
-    meshSize.y < 1e-6 ? 1 : meshSize.y,
-    meshSize.z < 1e-6 ? 1 : meshSize.z,
-  );
-
-  const centerDist = frdCenter.distanceTo(meshCenter);
-  const meshDiagonal = Math.sqrt(
-    effectiveMeshSize.x ** 2 + effectiveMeshSize.y ** 2 + effectiveMeshSize.z ** 2,
-  );
-  if (meshDiagonal === 0) return { status: "suspicious", reason: "Mesh has zero size" };
-
-  if (centerDist / meshDiagonal > 0.5) {
-    return {
-      status: "suspicious",
-      reason: `Center offset ${(centerDist / meshDiagonal * 100).toFixed(1)}% of diagonal`,
-    };
-  }
-
-  const sizeRatioX = frdSize.x / (meshSize.x || 1);
-  const sizeRatioY = frdSize.y / (meshSize.y || 1);
-  const sizeRatioZ = frdSize.z / (meshSize.z || 1);
-  if (
-    sizeRatioX < 0.01 || sizeRatioX > 100 ||
-    sizeRatioY < 0.01 || sizeRatioY > 100 ||
-    sizeRatioZ < 0.01 || sizeRatioZ > 100
-  ) {
-    return { status: "suspicious", reason: "Size ratio out of bounds" };
-  }
-  return { status: "aligned" };
 }
 
 export function applyFieldColors(
@@ -214,6 +189,7 @@ export function applyFieldColors(
   minVal: number,
   maxVal: number,
   colormap?: string | null,
+  options?: FieldColorMappingOptions,
 ): { applied: boolean; bboxStatus: "aligned" | "suspicious" | null; warnings: string[] } {
   let applied = false;
   const warnings: string[] = [];
@@ -221,6 +197,14 @@ export function applyFieldColors(
 
   const grid = buildUniformGrid(nodeCoords);
   const bboxCheck = checkBboxAlignment(nodeCoords, object);
+
+  const clampMin = options?.clampMin ?? null;
+  const clampMax = options?.clampMax ?? null;
+  const displayMin = clampMin != null ? Math.max(clampMin, minVal) : minVal;
+  const displayMax = clampMax != null ? Math.min(clampMax, maxVal) : maxVal;
+  const displayRange = displayMax > displayMin ? displayMax - displayMin : 1;
+  const bands = options?.bands && options.bands >= 2 ? options.bands : null;
+  const threshold = options?.threshold ?? null;
 
   object.traverse((node) => {
     if (!(node instanceof THREE.Mesh)) return;
@@ -234,16 +218,80 @@ export function applyFieldColors(
       const vz = pos.getZ(i);
       const bestIdx = nearestNodeIndex(vx, vy, vz, grid, nodeCoords);
       const val = values[bestIdx] ?? minVal;
-      const t = (val - minVal) / valueRange;
+
+      if (threshold != null && val < threshold) {
+        colors[i * 3] = NO_COLOR.r;
+        colors[i * 3 + 1] = NO_COLOR.g;
+        colors[i * 3 + 2] = NO_COLOR.b;
+        continue;
+      }
+
+      const clamped = Math.max(displayMin, Math.min(displayMax, val));
+      let t = (clamped - displayMin) / displayRange;
+      if (bands != null) {
+        t = quantize(t, bands);
+      }
       const col = sampleColormap(t, colormap);
       colors[i * 3] = col.r;
       colors[i * 3 + 1] = col.g;
       colors[i * 3 + 2] = col.b;
     }
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    node.material = new THREE.MeshStandardMaterial({ vertexColors: true, metalness: 0.1, roughness: 0.65 });
+    node.material = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      metalness: 0.1,
+      roughness: 0.65,
+      side: THREE.DoubleSide,
+    });
     applied = true;
   });
-  if (bboxCheck.reason) warnings.push(bboxCheck.reason);
+
   return { applied, bboxStatus: bboxCheck.status, warnings };
+}
+
+function checkBboxAlignment(
+  nodeCoords: [number, number, number][],
+  object: THREE.Object3D,
+): { status: "aligned" | "suspicious" | null } {
+  if (nodeCoords.length === 0) return { status: null };
+
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const [x, y, z] of nodeCoords) {
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+    minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+  }
+  const nodeCenter = new THREE.Vector3(
+    (minX + maxX) / 2,
+    (minY + maxY) / 2,
+    (minZ + maxZ) / 2,
+  );
+  const nodeSize = new THREE.Vector3(
+    Math.max(1e-6, maxX - minX),
+    Math.max(1e-6, maxY - minY),
+    Math.max(1e-6, maxZ - minZ),
+  );
+
+  const box = new THREE.Box3().setFromObject(object);
+  const meshCenter = new THREE.Vector3();
+  const meshSize = new THREE.Vector3();
+  box.getCenter(meshCenter);
+  box.getSize(meshSize);
+
+  const centerOffset = nodeCenter.distanceTo(meshCenter);
+  const sizeRatio = Math.max(
+    meshSize.x / nodeSize.x,
+    meshSize.y / nodeSize.y,
+    meshSize.z / nodeSize.z,
+    nodeSize.x / meshSize.x,
+    nodeSize.y / meshSize.y,
+    nodeSize.z / meshSize.z,
+  );
+
+  const threshold = Math.max(nodeSize.length(), meshSize.length()) * 0.25;
+  if (centerOffset > threshold || sizeRatio > 5) {
+    return { status: "suspicious" };
+  }
+  return { status: "aligned" };
 }

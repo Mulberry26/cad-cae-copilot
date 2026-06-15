@@ -8,7 +8,11 @@ import type { ViewerLoadState } from "../../../appTypes";
 import { fieldLabel, resolveAssetFormat } from "../../../appUtils";
 import type { SolverFieldDescriptor } from "../../../types";
 import { fitCameraToObject } from "../../viewer/camera";
-import { applyFieldColors, applyYNormalizedColors } from "../../viewer/fieldColors";
+import {
+  applyFieldColors,
+  applyYNormalizedColors,
+  type FieldColorMappingOptions,
+} from "../../viewer/fieldColors";
 
 /**
  * Load a GLB or STL preview asset into the scene, apply optional field
@@ -27,6 +31,7 @@ export function useAssetLoader(
   fieldDescriptor: SolverFieldDescriptor | null | undefined,
   onObjectReady: () => void,
   setViewerState: (state: { status: ViewerLoadState; detail: string }) => void,
+  colorMapping?: FieldColorMappingOptions | null,
 ) {
   // Stable callback refs so the effect can read the latest callbacks
   // without adding them to the dependency array.
@@ -48,6 +53,10 @@ export function useAssetLoader(
         fieldDescriptor.source ?? "",
         fieldDescriptor.values?.length ?? 0,
         fieldDescriptor.node_coords?.length ?? 0,
+        colorMapping?.clampMin ?? "",
+        colorMapping?.clampMax ?? "",
+        colorMapping?.bands ?? "",
+        colorMapping?.threshold ?? "",
       ].join("|")
     : "";
 
@@ -88,6 +97,7 @@ export function useAssetLoader(
           fieldDescriptor.min_value,
           fieldDescriptor.max_value,
           fieldDescriptor.colormap,
+          colorMapping ?? undefined,
         );
         if (applied && fieldDescriptor) {
           fieldDescriptor.bbox_status = bboxStatus;
