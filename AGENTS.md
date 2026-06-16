@@ -348,6 +348,12 @@ single-part edit.
   `/api/projects/{id}/fields/{name}` and `/cae-result-fields` endpoints serve all
   of them from the FRD when available, with honest synthetic fallbacks and units
   when no solver result is present.
+- **Future roadmap modules.** The post-#272 planning produced eight tracked
+  upstream issues (#273–#280) covering alpha release unblocking, CAE viewer
+  epic closure, analytical benchmarks, trust/contract hardening, design
+  exploration workbench, VS Code extension productization, solver
+  interoperability, and manufacturing-aware engineering. See
+  [`docs/roadmap.md`](docs/roadmap.md) for the module table.
 **Follow-up / reply normalization.** Follow-up and reply messages are re-resolved
 so their intent is recorded explicitly rather than left implicit
 (`_normalize_followup_intent` in

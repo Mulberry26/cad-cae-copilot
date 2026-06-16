@@ -1286,6 +1286,23 @@ deferred until the interface is exercised by at least one non-FreeCAD provider.
 
 ---
 
+## Future — Roadmap Modules (post-#272 planning)
+
+The following modules were created from a synthesis of the open issue
+landscape and external CAD/CAE-AI trends. Each module has a dedicated
+upstream issue for tracking.
+
+| Module | Issue | Priority | Core ask |
+|---|---|---|---|
+| Alpha release unblocking | #273 | P0 | Land #234, run packaged dogfood, publish `v0.1.0-alpha`. |
+| CAE 3D visualization epic closure | #274 | P1 | Deformed shape, clipping plane, animation, load-case selector, retire `/stress-heatmap`. |
+| Analytical FEA benchmark corpus | #275 | P1 | Land PR #267, add CI regression harness, publish scorecard. |
+| Trust & contract hardening | #276 | P1 | Version-surface CI gate, geometry-kernel verification, credibility report endpoint. |
+| Design exploration workbench | #277 | P2 | Frontend panel for sizing sweep, mesh convergence, and candidate ranking. |
+| VS Code extension productization | #278 | P2 | Validate approvals in-editor, ship `.vsix`, close #215/#230. |
+| Solver interoperability & mesh reliability | #279 | P2 | Binary FRD/VTU importers, robust Gmsh handoff, Code_Aster/ElmerFEM scaffold. |
+| Manufacturing-aware engineering | #280 | P2/P3 | Tolerance stack-up, process-aware DfM rule-packs, BOM export. |
+
 ## Out of Scope (Intentional Boundaries)
 
 These are not on the roadmap because they would violate the design invariants:
